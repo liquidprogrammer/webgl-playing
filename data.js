@@ -269,3 +269,84 @@ var F_3D_COLORS = new Uint8Array([
     	positions[ii + 2] = vector[2];
 	}
 }
+
+function createRects(count, isBad) {
+	var vertPerItem = 12
+	var verticies = new Float32Array(vertPerItem * count)
+
+	var rects = []
+	for (var i = 0; i < count; i++) {
+		rects.push({
+			verticies: isBad ? new Float32Array(vertPerItem) : null,
+			vertPerItem: vertPerItem,
+			offset: isBad ? 0 : i * vertPerItem,
+			color: {
+				r: 0,
+				g: 0,
+				b: 0,
+				a: Math.random() > 0.5 ? 1 : 0.5
+			}
+		})
+	}
+
+	return {
+		rects: rects,
+		verticies: verticies
+	}
+}
+
+function to255range(color) {
+	return (color * 255) | 0
+}
+
+function toRgba(color) {
+	return `rgba(${to255range(color.r)}, ${to255range(color.g)}, ${to255range(color.b)}, ${color.a})`
+}
+
+var testColor = 'rgba(123, 234, 123, 1)'
+
+function simulate(rects, verticies) {
+	for (var i = 0; i < rects.length; i++) {
+		var rect = rects[i]
+
+		var x = randomInt(300)
+		var y = randomInt(300)
+		var w = randomInt(300)
+		var h = randomInt(300)
+		rect.x = x
+		rect.y = y
+		rect.w = w
+		rect.h = h
+		rect.color.r = Math.random()
+		rect.color.g = Math.random()
+		rect.color.b = Math.random()
+		rect.color.rgba = toRgba(rect.color)
+		//rect.color.rgba = testColor
+
+		var offset = rect.offset
+		var verts
+		if (rect.verticies) {
+			// NOTE: bad version, verticies per object, hard pressure for GPU data channel
+			verts = rect.verticies
+		} else {
+			verts = verticies
+		}
+
+		var x1 = x
+		var x2 = x + w
+		var y1 = y
+		var y2 = y + h
+		verts[offset + 0] = x1
+		verts[offset + 1] = y1
+		verts[offset + 2] = x2
+		verts[offset + 3] = y1
+		verts[offset + 4] = x1
+		verts[offset + 5] = y2
+		verts[offset + 6] = x1
+		verts[offset + 7] = y2
+		verts[offset + 8] = x2
+		verts[offset + 9] = y1
+		verts[offset + 10] = x2
+		verts[offset + 11] = y2
+	}
+}

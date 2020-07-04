@@ -416,3 +416,13 @@ function resizeGl(gl, state) {
   }
 }
 
+function resizeCtx(ctx, state) {
+  if (
+    ctx.canvas.width !== state.displayWidth ||
+    ctx.canvas.height !== state.displayHeight
+  ) {
+    ctx.canvas.width = state.displayWidth;
+    ctx.canvas.height = state.displayHeight;
+  }
+}
+
