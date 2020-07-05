@@ -359,6 +359,10 @@ function randomInt(range) {
 	return Math.floor(Math.random() * range)
 }
 
+function isPowerOf2(value) {
+	return (value & (value - 1)) === 0
+}
+
 function degreesToRadians(degrees) {
 	return degrees * Math.PI / 180
 }
@@ -379,7 +383,7 @@ function createShader(gl, type, source) {
   return shader;
 }
 
-function createProgram(gl, shaders) {
+function createProgram0(gl, shaders) {
 	var program = gl.createProgram();
 	shaders.forEach(function (shader) {
 		gl.attachShader(program, shader);
@@ -392,6 +396,64 @@ function createProgram(gl, shaders) {
 	}
 
 	return program
+}
+
+function createProgram(gl, vertexSource, fragmentSource) {
+	var vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexSource);
+	var fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+	var program = createProgram0(gl, [vertexShader, fragmentShader])
+	return program
+}
+
+function createTexture(gl, src) {
+	var tex = gl.createTexture()
+	gl.bindTexture(gl.TEXTURE_2D, tex)
+	// TODO: fill by default with 1x1 black square? for debugging purposes?
+	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255])) 
+
+	var img = new Image()
+
+	var textureInfo = {
+		error: null,
+		texture: tex,
+		width: 1,
+		height: 1,
+		img: img,
+		imgLoaded: false,
+		texLoaded: false,
+	}
+
+	// TODO: do i need to store the original img? Or this is not needed and it is better to reload it
+	// from scratch if i need to restore the texture? Keeping it in memory is expensive? Plus
+	// it will be doubled: in RAM and in GPU
+	img.addEventListener('load', function () {
+		textureInfo.width = img.width
+		textureInfo.height = img.height
+		textureInfo.imgLoaded = true
+		return
+
+		gl.bindTexture(gl.TEXTURE_2D, tex)
+		var _s = performance.now()
+		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img)
+		var _e = performance.now()
+		console.log('uploaded in', _e - _s)
+
+		if (isPowerOf2(img.width) && isPowerOf2(img.height)) {
+			gl.generateMipmap(gl.TEXTURE_2D)
+		} else {
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+		}
+	})
+	img.addEventListener('error', function(error) {
+		textureInfo.error = error
+		console.error('Failed to load texture image', error, src)
+	})
+	img.src = src
+
+	return textureInfo
 }
 
 function resizeCanvas0(state, canvas, fov, zNear, zFar) {

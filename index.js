@@ -1,3 +1,5 @@
+'use strict'
+
 var VERTEX_SHADER_SOURCE = `
   attribute vec2 a_position;
   uniform mat3 u_matrix;
@@ -13,6 +15,31 @@ var FRAGMENT_SHADER_SOURCE = `
  
   void main() {
     gl_FragColor = u_color;
+  }
+`;
+
+var VERTEX_SHADER_TEXTURE_SOURCE = `
+  attribute vec4 a_position;
+  attribute vec2 a_texcoord;
+
+  uniform mat4 u_matrix;
+
+  varying vec2 v_texcoord;
+ 
+  void main() {
+  	gl_Position = u_matrix * a_position;
+  	v_texcoord = a_texcoord;
+  }
+`;
+var FRAGMENT_SHADER_TEXTURE_SOURCE = `
+  precision mediump float;
+
+  varying vec2 v_texcoord;
+
+  uniform sampler2D u_texture;
+
+  void main() {
+    gl_FragColor = texture2D(u_texture, v_texcoord);
   }
 `;
 
@@ -39,32 +66,44 @@ if (!gl) {
   throw new Error("no webgl");
 }
 
-var vertexShader = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SOURCE);
-var fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER_SOURCE);
-var program = createProgram(gl, [vertexShader, fragmentShader])
-
-var a_position = gl.getAttribLocation(program, "a_position");
-var u_matrix = gl.getUniformLocation(program, 'u_matrix');
-var u_color = gl.getUniformLocation(program, 'u_color');
-
-resizeGl(gl, STATE);
-gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
 gl.clearColor(0.5, 0.5, 0.5, 1);
-
-gl.useProgram(program);
-
-gl.enable(gl.BLEND);
+gl.enable(gl.BLEND); // TODO: may be this shouldn't be global? No idea for now, seems like it should
 gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-var positionBuffer = gl.createBuffer();
-gl.enableVertexAttribArray(a_position);
-gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-gl.vertexAttribPointer(a_position, 2, gl.FLOAT, false, 0, 0);
+{
+	var program = createProgram(gl, VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE)
+	var a_position = gl.getAttribLocation(program, 'a_position');
+	var u_matrix = gl.getUniformLocation(program, 'u_matrix');
+	var u_color = gl.getUniformLocation(program, 'u_color');
+	var positionBuffer = gl.createBuffer();
 
-function drawRect(gl, rect) {
-	var color = rect.color
-	gl.uniform4f(u_color, color.r, color.g, color.b, color.a)
-	gl.drawArrays(gl.TRIANGLES, rect.offset, 6);
+	STATE.rectProgram = {
+		program: program,
+		a_position: a_position,
+		u_matrix: u_matrix,
+		u_color: u_color,
+		positionBuffer: positionBuffer,
+	}
+}
+{
+	var program = createProgram(gl, VERTEX_SHADER_TEXTURE_SOURCE, FRAGMENT_SHADER_TEXTURE_SOURCE)
+	var a_position = gl.getAttribLocation(program, 'a_position')
+	var a_texcoord = gl.getAttribLocation(program, 'a_texcoord')
+	var u_matrix = gl.getUniformLocation(program, 'u_matrix')
+	var u_texture = gl.getUniformLocation(program, 'u_texture')
+
+	var positionBuffer = gl.createBuffer();
+	var texcoordBuffer = gl.createBuffer();
+
+	STATE.texProgram = {
+		program: program,
+		a_position: a_position,
+		a_texcoord: a_texcoord,
+		u_matrix: u_matrix,
+		u_texture: u_texture,
+		positionBuffer: positionBuffer,
+		texcoordBuffer: texcoordBuffer,
+	}
 }
 
 STATE.isBad = false
@@ -73,45 +112,153 @@ var _r = createRects(20000, STATE.isBad)
 STATE.rects = _r.rects
 STATE.verticies = _r.verticies
 
-simulate(STATE.rects, STATE.verticies)
-
+STATE.images = {
+	verticies: new Float32Array([
+		0, 0,
+		1, 0,
+		0, 1,
+		0, 1,
+		1, 0,
+		1, 1,
+	]),
+	texCoords: new Float32Array([
+		0, 0,
+		1, 0,
+		0, 1,
+		0, 1,
+		1, 0,
+		1, 1,
+	]),
+	// images are too big, 1000 images will eat all the memory on my GPU and canvas will crash :D
+	// TODO: how to measure the memory amount i took? Calculate this by hand?
+	// Like width * height * pixelRatio + mipMaps, thats how much per image? So i need to destroy old textures if limit is reached?
+	list: new Array(100).fill(0).map(_ => createImage('./me.JPG'))
+} 
+STATE.iterations = 0
 var prevTime = 0
 
-function drawScene(gl, dt) {
-	gl.clear(gl.COLOR_BUFFER_BIT);
-
-	var m = m3.projection(STATE.width, STATE.height)
-	m = m3.multiply(m, m3.translation(100, 50))
-	m = m3.multiply(m, m3.rotation(0))
-	m = m3.multiply(m, m3.scaling(1, 1))
-
-	gl.uniformMatrix3fv(u_matrix, false, m)
+function updateAndRender(time) {
+	time *= 0.001
+	if (!prevTime) {
+		prevTime = time
+	}
+	var dt = time - prevTime
+	prevTime = time
 
 	simulate(STATE.rects, STATE.verticies)
-
-	if (!STATE.isBad) {
-		gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-		gl.bufferData(gl.ARRAY_BUFFER, STATE.verticies, gl.STATIC_DRAW);
-	}
-	
-	for (var i = 0; i < STATE.rects.length; i++) {
-		var rect = STATE.rects[i]
-
-		if (STATE.isBad) {
-			gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-			gl.bufferData(gl.ARRAY_BUFFER, rect.verticies, gl.STATIC_DRAW);
+	STATE.images.list.forEach(function (img) {
+		if (STATE.iterations % 1000 === 0) {
+			img.dx = Math.random() > 0.5 ? 1 : -1
+			img.dy = Math.random() > 0.5 ? 1 : -1
 		}
-
-		drawRect(gl, rect)
-	}
-
-	requestAnimationFrame((time) => {
-		if (!prevTime) {
-			prevTime = time
+		img.x += img.dx
+		img.y += img.dy
+		if (img.x > 300 && img.dx > 0) {
+			img.dx = -img.dx
 		}
-		var dt = time - prevTime
-		prevTime = time
-		drawScene(gl, dt)
+		if (img.y > 300 && img.dy > 0) {
+			img.dy = -img.dy
+		}
+		if (img.x < 50 && img.dx < 0) {
+			img.dx = -img.dx
+		}
+		if (img.y < 50 && img.dy < 0) {
+			img.dy = -img.dy
+		}
 	})
+	STATE.iterations++
+
+	resizeGl(gl, STATE);
+	gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+	gl.clear(gl.COLOR_BUFFER_BIT);
+
+	{
+		// NOTE: rects
+		gl.useProgram(STATE.rectProgram.program)
+		gl.enableVertexAttribArray(STATE.rectProgram.a_position);
+		gl.bindBuffer(gl.ARRAY_BUFFER, STATE.rectProgram.positionBuffer);
+		gl.vertexAttribPointer(STATE.rectProgram.a_position, 2, gl.FLOAT, false, 0, 0);
+
+		var m = m3.projection(STATE.width, STATE.height)
+		m = m3.multiply(m, m3.translation(100, 50))
+		m = m3.multiply(m, m3.rotation(0))
+		m = m3.multiply(m, m3.scaling(1, 1))
+
+		gl.uniformMatrix3fv(STATE.rectProgram.u_matrix, false, m)
+
+		if (!STATE.isBad) {
+			gl.bindBuffer(gl.ARRAY_BUFFER, STATE.rectProgram.positionBuffer);
+			gl.bufferData(gl.ARRAY_BUFFER, STATE.verticies, gl.STATIC_DRAW);
+		}
+		
+		for (var i = 0; i < STATE.rects.length; i++) {
+			var rect = STATE.rects[i]
+
+			if (STATE.isBad) {
+				gl.bindBuffer(gl.ARRAY_BUFFER, STATE.rectProgram.positionBuffer);
+				gl.bufferData(gl.ARRAY_BUFFER, rect.verticies, gl.STATIC_DRAW);
+			}
+
+			var color = rect.color
+			gl.uniform4f(STATE.rectProgram.u_color, color.r, color.g, color.b, color.a)
+			gl.drawArrays(gl.TRIANGLES, rect.offset, 6);
+		}
+	}
+	{
+		// NOTE: images
+
+		gl.useProgram(STATE.texProgram.program)
+		gl.enableVertexAttribArray(STATE.texProgram.a_position);
+		gl.bindBuffer(gl.ARRAY_BUFFER, STATE.texProgram.positionBuffer);
+		gl.bufferData(gl.ARRAY_BUFFER, STATE.images.verticies, gl.STATIC_DRAW)
+		gl.vertexAttribPointer(STATE.texProgram.a_position, 2, gl.FLOAT, false, 0, 0);
+
+		gl.enableVertexAttribArray(STATE.texProgram.a_texcoord);
+		gl.bindBuffer(gl.ARRAY_BUFFER, STATE.texProgram.texcoordBuffer);
+		gl.vertexAttribPointer(STATE.texProgram.a_texcoord, 2, gl.FLOAT, false, 0, 0);
+		gl.bufferData(gl.ARRAY_BUFFER, STATE.images.texCoords, gl.STATIC_DRAW)
+
+		// TODO: this is just a fast hack to imitate textures uploading queue
+		// Let uploading took maximum 10ms, measure that and check how much per frame i can upload?
+		var blockUploadTexture = false
+		for (var i = 0; i < STATE.images.list.length; i++) {
+			var image = STATE.images.list[i]
+			if (!image.texture) {
+				image.texture = createTexture(gl, image.src)
+			}
+			if (image.texture.texLoaded) {
+				gl.bindTexture(gl.TEXTURE_2D, image.texture.texture)
+
+				var m = m4.orthographic(0, gl.canvas.width, gl.canvas.height, 0, -1, 1)
+				m = m4.multiply(m, m4.translation(image.x, image.y, 0))
+				m = m4.multiply(
+					m,
+					m4.scaling(image.texture.width * image.scale, image.texture.height * image.scale, 1))
+
+				gl.uniformMatrix4fv(STATE.texProgram.u_matrix, false, m)
+				gl.uniform1i(STATE.texProgram.u_texture, 0)
+				gl.drawArrays(gl.TRIANGLES, 0, 6)
+			} else if (image.texture.imgLoaded && !blockUploadTexture) {
+				blockUploadTexture = true
+				gl.bindTexture(gl.TEXTURE_2D, image.texture.texture)
+				var _s = performance.now()
+				gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image.texture.img)
+				var _e = performance.now()
+				console.log('uploaded in', _e - _s)
+
+				if (isPowerOf2(image.texture.width) && isPowerOf2(image.texture.height)) {
+					gl.generateMipmap(gl.TEXTURE_2D)
+				} else {
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+				}
+				image.texture.texLoaded = true
+			}
+		}
+	}
+
+	requestAnimationFrame(updateAndRender)
 }
-drawScene(gl, 0)
+requestAnimationFrame(updateAndRender)

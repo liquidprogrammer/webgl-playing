@@ -295,6 +295,18 @@ function createRects(count, isBad) {
 	}
 }
 
+function createImage(src) {
+	return {
+		src: src,
+		x: 50 + randomInt(100),
+		y: 50 + randomInt(100),
+		dx: 0,
+		dy: 0,
+		scale: Math.max(0.05, Math.min(0.25, Math.random())),
+		texture: null,
+	}
+}
+
 function to255range(color) {
 	return (color * 255) | 0
 }
