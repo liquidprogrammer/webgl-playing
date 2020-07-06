@@ -405,23 +405,72 @@ function createProgram(gl, vertexSource, fragmentSource) {
 	return program
 }
 
-function createTexture(gl, src) {
+function makeTextCanvas(text, w, h) {
+	var textCtx = document.createElement('canvas').getContext('2d')
+
+	textCtx.canvas.width  = w
+	textCtx.canvas.height = h
+	textCtx.font = '60px monospace'
+	textCtx.textAlign = 'center'
+	textCtx.textBaseline = 'middle'
+	textCtx.fillStyle = 'black'
+	textCtx.clearRect(0, 0, w, h)
+	textCtx.fillText(text, w / 2, h / 2)
+
+	return textCtx.canvas
+}
+
+function createTexture(gl) {
 	var tex = gl.createTexture()
 	gl.bindTexture(gl.TEXTURE_2D, tex)
 	// TODO: fill by default with 1x1 black square? for debugging purposes?
 	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255])) 
-
-	var img = new Image()
 
 	var textureInfo = {
 		error: null,
 		texture: tex,
 		width: 1,
 		height: 1,
-		img: img,
+		imgData: null,
 		imgLoaded: false,
 		texLoaded: false,
 	}
+
+	return textureInfo
+}
+
+function uploadToGpu(gl, textureInfo) {
+	gl.bindTexture(gl.TEXTURE_2D, textureInfo.texture)
+	var _s = performance.now()
+	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, textureInfo.imgData)
+	var _e = performance.now()
+	console.log('uploaded in', _e - _s)
+
+	if (isPowerOf2(textureInfo.width) && isPowerOf2(textureInfo.height)) {
+		gl.generateMipmap(gl.TEXTURE_2D)
+	} else {
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	}
+	textureInfo.texLoaded = true
+}
+
+function createTextureFromCanvas(gl, canvas) {
+	var textureInfo = createTexture(gl)
+	textureInfo.imgData = canvas
+	textureInfo.imgLoaded = true
+	textureInfo.width = canvas.width
+	textureInfo.height = canvas.height
+
+	return textureInfo
+}
+
+function createTextureFromSrc(gl, src) {
+	var textureInfo = createTexture(gl)
+
+	var img = new Image()
 
 	// TODO: do i need to store the original img? Or this is not needed and it is better to reload it
 	// from scratch if i need to restore the texture? Keeping it in memory is expensive? Plus
@@ -430,22 +479,7 @@ function createTexture(gl, src) {
 		textureInfo.width = img.width
 		textureInfo.height = img.height
 		textureInfo.imgLoaded = true
-		return
-
-		gl.bindTexture(gl.TEXTURE_2D, tex)
-		var _s = performance.now()
-		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img)
-		var _e = performance.now()
-		console.log('uploaded in', _e - _s)
-
-		if (isPowerOf2(img.width) && isPowerOf2(img.height)) {
-			gl.generateMipmap(gl.TEXTURE_2D)
-		} else {
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-		}
+		textureInfo.imgData = img
 	})
 	img.addEventListener('error', function(error) {
 		textureInfo.error = error

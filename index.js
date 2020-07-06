@@ -52,6 +52,9 @@ var STATE = {
   rects: null,
   verticies: null,
   isBad: false,
+  IMAGES_COUNT: 0,
+  RECTS_COUNT: 0,
+  TEXTS: new Array(100).fill(0).map(_ => words[(Math.random() * (words.length - 1)) | 0])
 };
 var canvas = document.createElement("canvas");
 function resizeCanvas() {
@@ -106,9 +109,7 @@ gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 	}
 }
 
-STATE.isBad = false
-
-var _r = createRects(20000, STATE.isBad)
+var _r = createRects(STATE.RECTS_COUNT, STATE.isBad)
 STATE.rects = _r.rects
 STATE.verticies = _r.verticies
 
@@ -132,8 +133,20 @@ STATE.images = {
 	// images are too big, 1000 images will eat all the memory on my GPU and canvas will crash :D
 	// TODO: how to measure the memory amount i took? Calculate this by hand?
 	// Like width * height * pixelRatio + mipMaps, thats how much per image? So i need to destroy old textures if limit is reached?
-	list: new Array(100).fill(0).map(_ => createImage('./me.JPG'))
+	list: new Array(STATE.IMAGES_COUNT).fill(0).map(_ => createImage('./me.JPG'))
 } 
+for (var i = 0; i < STATE.TEXTS.length; i++) {
+	STATE.images.list.push({
+		canvas: makeTextCanvas(STATE.TEXTS[i], 500, 100),
+		x: 50 + randomInt(400),
+		y: 50 + randomInt(400),
+		dx: 0,
+		dy: 0,
+		scale: 1,
+		texture: null,
+	})
+}
+
 STATE.iterations = 0
 var prevTime = 0
 
@@ -153,10 +166,10 @@ function updateAndRender(time) {
 		}
 		img.x += img.dx
 		img.y += img.dy
-		if (img.x > 300 && img.dx > 0) {
+		if (img.x > 600 && img.dx > 0) {
 			img.dx = -img.dx
 		}
-		if (img.y > 300 && img.dy > 0) {
+		if (img.y > 600 && img.dy > 0) {
 			img.dy = -img.dy
 		}
 		if (img.x < 50 && img.dx < 0) {
@@ -224,37 +237,29 @@ function updateAndRender(time) {
 		for (var i = 0; i < STATE.images.list.length; i++) {
 			var image = STATE.images.list[i]
 			if (!image.texture) {
-				image.texture = createTexture(gl, image.src)
-			}
-			if (image.texture.texLoaded) {
-				gl.bindTexture(gl.TEXTURE_2D, image.texture.texture)
-
-				var m = m4.orthographic(0, gl.canvas.width, gl.canvas.height, 0, -1, 1)
-				m = m4.multiply(m, m4.translation(image.x, image.y, 0))
-				m = m4.multiply(
-					m,
-					m4.scaling(image.texture.width * image.scale, image.texture.height * image.scale, 1))
-
-				gl.uniformMatrix4fv(STATE.texProgram.u_matrix, false, m)
-				gl.uniform1i(STATE.texProgram.u_texture, 0)
-				gl.drawArrays(gl.TRIANGLES, 0, 6)
-			} else if (image.texture.imgLoaded && !blockUploadTexture) {
-				blockUploadTexture = true
-				gl.bindTexture(gl.TEXTURE_2D, image.texture.texture)
-				var _s = performance.now()
-				gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image.texture.img)
-				var _e = performance.now()
-				console.log('uploaded in', _e - _s)
-
-				if (isPowerOf2(image.texture.width) && isPowerOf2(image.texture.height)) {
-					gl.generateMipmap(gl.TEXTURE_2D)
-				} else {
-					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+				if (image.src) {
+					image.texture = createTextureFromSrc(gl, image.src)
+				} else if (image.canvas) {
+					image.texture = createTextureFromCanvas(gl, image.canvas)
 				}
-				image.texture.texLoaded = true
+			}
+			if (image.texture) {
+				if (image.texture.texLoaded) {
+					gl.bindTexture(gl.TEXTURE_2D, image.texture.texture)
+
+					var m = m4.orthographic(0, gl.canvas.width, gl.canvas.height, 0, -1, 1)
+					m = m4.multiply(m, m4.translation(image.x, image.y, 0))
+					m = m4.multiply(
+						m,
+						m4.scaling(image.texture.width * image.scale, image.texture.height * image.scale, 1))
+
+					gl.uniformMatrix4fv(STATE.texProgram.u_matrix, false, m)
+					gl.uniform1i(STATE.texProgram.u_texture, 0)
+					gl.drawArrays(gl.TRIANGLES, 0, 6)
+				} else if (image.texture.imgLoaded && !blockUploadTexture) {
+					blockUploadTexture = true
+					uploadToGpu(gl, image.texture)
+				}
 			}
 		}
 	}
