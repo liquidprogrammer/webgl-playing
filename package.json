@@ -1,0 +1,21 @@
+{
+  "name": "webgl-playing",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "start": "webpack-dev-server --open",
+    "ts_watch": "tsc -w --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "devDependencies": {
+    "@types/webpack-env": "1.15.2",
+    "file-loader": "6.0.0",
+    "html-webpack-plugin": "4.3.0",
+    "ts-loader": "7.0.5",
+    "typescript": "3.9.6",
+    "webpack": "4.43.0",
+    "webpack-cli": "3.3.12",
+    "webpack-dev-server": "3.11.0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+	"compilerOptions": {
+		"allowJs": true,
+		"importHelpers": true,
+		"module": "es6",
+		"target": "es5",
+		"lib": ["es5", "es2015", "dom"],
+		"baseUrl": ".",
+		"sourceMap": false,
+		"strict": true
+	},
+	"include": ["./src"]
+}
