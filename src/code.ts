@@ -1,244 +1,165 @@
-import {State, GLState, Input} from './types'
+import {State, GLState, Input, TextureQueueItem} from './types'
 import {resizeGl, createProgram, uploadToGl, createTexture, TextureInfo} from './gl'
 import {m3, m4, randomInt, toRgba} from './utils'
 import {words, stickerColors} from './data'
 
-// TODO: pass inputs here with dt
 // TODO:
-// 1. create canvas outside of here
-// 2. move all input processing outside of here
-// 3. all matrix calculations should be done in simulation phase
+// - all matrix calculations should be done in simulation phase
+// - move gl out of here
 
-export function updateAndRender(state: State, input: Input) {
+export function updateAndRender(gl: WebGLRenderingContext, state: State, input: Input) {
 	if (!state.initialized) {
 		console.info('init')
 
 		state.initialized = true
 
-		let canvas = document.createElement('canvas')
-		let gl = canvas.getContext('webgl')
-		if (!gl) {
-			let div = document.createElement('div')
-			div.setAttribute('style', 'width: 100%; height: 100%; background: red;')
-			div.innerText = 'NO WEBGL SUPPORT'
-			document.body.appendChild(div)
-		} else {
-			state.gl = {
-				gl: gl,
-				initialized: false,
-			} as GLState
+		let sentinel = {} as TextureQueueItem
+		sentinel.next = sentinel
+		sentinel.prev = sentinel
 
+		state.gl = {
+			gl: gl,
+			initialized: false,
+			texturesQueue: {
+				head: sentinel,
+				sentinel: sentinel,
+			}
+		} as GLState
+		const IS_BAD = false
+		const RECTS_COUNT = 0
+		const IMAGES_COUNT = 0//10
+		const TEXTS_COUNT = 0//10
+		const STICKERS_COUNT = 500
+
+		state.app = {
+			iterations: 0,
+			isBad: IS_BAD,
+			verticies: null!,
+			rects: [],
+			images: null!,
+
+			pointer: {
+				prevX: 0,
+				prevY: 0,
+			},
+
+			camera: {
+				x: 0,
+				y: 0,
+				rotation: 0,
+				zoom: 1,
+			},
+			viewProjectionM3: [],
+			viewProjectionM4: [],
 		}
-		if (state.gl) {
-			const IS_BAD = false
-			const RECTS_COUNT = 0
-			const IMAGES_COUNT = 0//10
-			const TEXTS_COUNT = 0//10
-			const STICKERS_COUNT = 500
+		updateViewProjection(state)
 
-			state.app = {
-				screenW: 0,
-				screenH: 0,
-				aspect: 0,
-				displayW: 0,
-				displayH: 0,
+		{
+			let vertPerItem = 12
+			let verticies = new Float32Array(vertPerItem * RECTS_COUNT)
 
-				iterations: 0,
-				isBad: IS_BAD,
-				verticies: null!,
-				rects: [],
-				images: null!,
-
-				camera: {
+			for (let i = 0; i < RECTS_COUNT; i++) {
+				state.app.rects.push({
 					x: 0,
 					y: 0,
-					rotation: 0,
-					zoom: 1,
-				},
-				viewProjectionM3: [],
-				viewProjectionM4: [],
-			}
-			updateViewProjection(state.gl.gl, state)
-
-			// TODO: handle gl context missing. There are some cases when context will be missed and
-			// every buffer will become dead: https://www.khronos.org/webgl/wiki/HandlingContextLost
-			// Reset glInitialized when context lost/restored
-			let resizeCanvas = () => {
-				state.app.screenW = document.documentElement.clientWidth
-				state.app.screenH = document.documentElement.clientHeight
-				state.app.aspect = state.app.screenW / state.app.screenH
-				// TODO: devicePixelRatio is not supported everywhere, may be we need to
-				// check backingStorePixelRatio too (google that)
-				state.app.displayW = state.app.screenW * window.devicePixelRatio
-				state.app.displayH = state.app.screenH * window.devicePixelRatio
-
-				canvas.style.cssText = `width: ${state.app.screenW}px; height: ${state.app.screenH}px;`
+					w: 0,
+					h: 0,
+					// NOTE: bad version, verticies per object, hard pressure for GPU data channel
+					verticies: state.app.isBad ? new Float32Array(vertPerItem) : verticies,
+					vertPerItem: vertPerItem,
+					offset: state.app.isBad ? 0 : i * vertPerItem,
+					color: [0, 0, 0, Math.random() > 0.5 ? 1 : 0.5]
+				})
 			}
 
-			let prevX = 0
-			let prevY = 0
-			let isDown = false
-			canvas.addEventListener('mousedown', event => {
-				prevX = event.clientX
-				prevY = event.clientY
-				isDown = true
-			})
-			canvas.addEventListener('mouseup', () => {
-				isDown = false
-			})
-			canvas.addEventListener('mousemove', event => {
-				if (isDown) {
-  	  	  	  	  	// TODO: that x2 is stupid, we need to count camera here somehow
-					let dx = (event.clientX - prevX) * 2
-					let dy = (event.clientY - prevY) * 2
-
-					prevX = event.clientX
-					prevY = event.clientY
-
-					state.app.camera.x -= dx / state.app.camera.zoom
-					state.app.camera.y -= dy / state.app.camera.zoom
-
-					updateViewProjection(state.gl.gl, state)
-				}
-			})
-
-			canvas.addEventListener('wheel', (e) => {
-				e.preventDefault()
-
-				let camera = state.app.camera
-
-				const [clipX, clipY] = getClipSpaceMousePosition(e.clientX, e.clientY, state)
-
-				// position before zooming
-				const [preZoomX, preZoomY] = m3.transformPoint(
-  	  	  	  	  m3.inverse(state.app.viewProjectionM3), 
-  	  	  	  	  [clipX, clipY])
-
-				// multiply the wheel movement by the current zoom level
-				// so we zoom less when zoomed in and more when zoomed out
-				const newZoom = camera.zoom * Math.pow(2, e.deltaY * -0.01)
-				camera.zoom = Math.max(0.02, Math.min(100, newZoom))
-
-				updateViewProjection(state.gl.gl, state)
-
-				// position after zooming
-				const [postZoomX, postZoomY] = m3.transformPoint(
-  	  	  	  	  m3.inverse(state.app.viewProjectionM3), 
-  	  	  	  	  [clipX, clipY])
-
-				// camera needs to be moved the difference of before and after
-				camera.x += preZoomX - postZoomX
-				camera.y += preZoomY - postZoomY
-
-				updateViewProjection(state.gl.gl, state)
-			})
-			window.addEventListener("resize", resizeCanvas)
-			resizeCanvas()
-			document.body.appendChild(canvas)
-
-			{
-				let vertPerItem = 12
-				let verticies = new Float32Array(vertPerItem * RECTS_COUNT)
-
-				for (let i = 0; i < RECTS_COUNT; i++) {
-					state.app.rects.push({
-						x: 0,
-						y: 0,
-						w: 0,
-						h: 0,
-						// NOTE: bad version, verticies per object, hard pressure for GPU data channel
-						verticies: state.app.isBad ? new Float32Array(vertPerItem) : verticies,
-						vertPerItem: vertPerItem,
-						offset: state.app.isBad ? 0 : i * vertPerItem,
-						color: [0, 0, 0, Math.random() > 0.5 ? 1 : 0.5]
-					})
-				}
-
-				state.app.verticies = verticies
-			}
-			{
-				state.app.images = {
-					verticies: new Float32Array([
-						0, 0,
-						1, 0,
-						0, 1,
-						0, 1,
-						1, 0,
-						1, 1,
-					]),
-					texCoords: new Float32Array([
-						0, 0,
-						1, 0,
-						0, 1,
-						0, 1,
-						1, 0,
-						1, 1,
-					]),
-					// images are too big, 1000 images will eat all the memory on my GPU and canvas will crash :D
-					// TODO: how to measure the memory amount i took? Calculate this by hand?
-					// Like width * height * pixelRatio + mipMaps, thats how much per image? So i need to destroy old textures if limit is reached?
-					list: new Array(IMAGES_COUNT).fill(0).map(_ => {
-						return {
-							src: require('./me.JPG'),
-							x: 50 + randomInt(100),
-							y: 50 + randomInt(100),
-							dx: 0,
-							dy: 0,
-							move: true,
-							scale: Math.max(0.05, Math.min(0.25, Math.random())),
-							texture: null,
-						}
-					})
-				}
-			}
-			{
-				for (let i = 0; i < TEXTS_COUNT; i++) {
-					let text = words[(Math.random() * (words.length - 1)) | 0]
-					state.app.images.list.push({
-						canvas: makeTextCanvas(text, 500, 100), // TODO: sizes are invalid
-						x: 50 + randomInt(400),
-						y: 50 + randomInt(400),
+			state.app.verticies = verticies
+		}
+		{
+			state.app.images = {
+				verticies: new Float32Array([
+					0, 0,
+					1, 0,
+					0, 1,
+					0, 1,
+					1, 0,
+					1, 1,
+				]),
+				texCoords: new Float32Array([
+					0, 0,
+					1, 0,
+					0, 1,
+					0, 1,
+					1, 0,
+					1, 1,
+				]),
+				// images are too big, 1000 images will eat all the memory on my GPU and canvas will crash :D
+				// TODO: how to measure the memory amount i took? Calculate this by hand?
+				// Like width * height * pixelRatio + mipMaps, thats how much per image? So i need to destroy old textures if limit is reached?
+				list: new Array(IMAGES_COUNT).fill(0).map(_ => {
+					return {
+						src: require('./me.JPG'),
+						x: 50 + randomInt(100),
+						y: 50 + randomInt(100),
 						dx: 0,
 						dy: 0,
+						rotation: 0,
 						move: true,
-						scale: 1,
+						scale: Math.max(0.05, Math.min(0.25, Math.random())),
 						texture: null,
-					})
-				}
+					}
+				})
 			}
-			{
-				for (let i = 0; i < STICKERS_COUNT; i++) {
-					let text = words[(Math.random() * (words.length - 1)) | 0]
-					let color = stickerColors[(Math.random() * (stickerColors.length - 1)) | 0]
-					let x = (Math.random() * 2 - 1) * 20000
-					let y = (Math.random() * 2 - 1) * 20000
-					let scale = Math.max(0.3, Math.random() * 2)
-					state.app.images.list.push({
-						src: require('./sticker-01.png'),
-						x: x,
-						y: y,
-						dx: 0,
-						dy: 0,
-						move: false,
-						scale: scale,
-						texture: null,
-					})
-					state.app.images.list.push({
-						canvas: makeTextCanvas(text, 300, 100), // TODO: sizes are invalid
-						x: x + 100 * scale,
-						y: y + 150 * scale,
-						dx: 0,
-						dy: 0,
-						move: false,
-						scale: scale,
-						texture: null,
-					})
-				}
+		}
+		{
+			for (let i = 0; i < TEXTS_COUNT; i++) {
+				let text = words[(Math.random() * (words.length - 1)) | 0]
+				state.app.images.list.push({
+					canvas: makeTextCanvas(text, 500, 100), // TODO: sizes are invalid
+					x: 50 + randomInt(400),
+					y: 50 + randomInt(400),
+					dx: 0,
+					dy: 0,
+					rotation: 0,
+					move: true,
+					scale: 1,
+					texture: null,
+				})
+			}
+		}
+		{
+			for (let i = 0; i < STICKERS_COUNT; i++) {
+				let text = words[(Math.random() * (words.length - 1)) | 0]
+				let color = stickerColors[(Math.random() * (stickerColors.length - 1)) | 0]
+				let x = (Math.random() * 2 - 1) * 10000
+				let y = (Math.random() * 2 - 1) * 10000
+				let scale = Math.max(0.3, Math.random() * 2)
+				state.app.images.list.push({
+					src: require('./sticker-01.png'),
+					x: x,
+					y: y,
+					dx: 0,
+					dy: 0,
+					rotation: 0,
+					move: false,
+					scale: scale,
+					texture: null,
+				})
+				state.app.images.list.push({
+					canvas: makeTextCanvas(text, 300, 100), // TODO: sizes are invalid
+					x: x + 100 * scale,
+					y: y + 150 * scale,
+					dx: 0,
+					dy: 0,
+					rotation: 0,
+					move: false,
+					scale: scale,
+					texture: null,
+				})
 			}
 		}
 	}
 
-	simulate(state)
+	simulate(state, input)
 
 	if (state.gl.gl) {
 		let gl = state.gl.gl
@@ -252,10 +173,38 @@ export function updateAndRender(state: State, input: Input) {
 
 			initializeGl(state)
 		}
+
+		let MAX_TIME_ALLOWED_TO_UPLOAD_TEXTURES_MS = 8
+		let queue = state.gl.texturesQueue
+		let startTime = performance.now()
+		while (queue.head.next !== queue.sentinel) {
+			let item = queue.head.next
+			queue.head.next = item.next
+			item.prev.prev = queue.head
+
+			uploadToGl(gl, item.textureInfo!)
+
+			let time = performance.now()
+			let elapsed = time - startTime
+			if (elapsed > MAX_TIME_ALLOWED_TO_UPLOAD_TEXTURES_MS) {
+				break
+			}
+		}
+
 		render(gl, state, input)
 	} else {
 		console.warn('Render is not defined')
 	}
+}
+
+function pushTextureToQueue(state: State, textureInfo: TextureInfo) { 
+	let queue = state.gl.texturesQueue
+	let item: TextureQueueItem = {
+		next: queue.head.next,
+		prev: queue.head,
+		textureInfo: textureInfo
+	}
+	queue.head.next = item
 }
 
 function makeCameraMatrix(state: State) {
@@ -278,16 +227,16 @@ function makeCameraMatrix4(state: State) {
 	return cameraMat
 }
 
-function updateViewProjection(gl: WebGLRenderingContext, state: State) {
+function updateViewProjection(state: State) {
 	// same as ortho(0, width, height, 0, -1, 1)
 	{
-		const projectionMat = m3.projection(gl.canvas.width, gl.canvas.height)
+		const projectionMat = m3.projection(state.canvasW, state.canvasH)
 		const cameraMat = makeCameraMatrix(state)
 		let viewMat = m3.inverse(cameraMat)
 		state.app.viewProjectionM3 = m3.multiply(projectionMat, viewMat)
 	}
 	{
-		const projectionMat = m4.projection(gl.canvas.width, gl.canvas.height, 1)
+		const projectionMat = m4.projection(state.canvasW, state.canvasH, 1)
 		const cameraMat = makeCameraMatrix4(state)
 		let viewMat = m4.inverse(cameraMat)
 		state.app.viewProjectionM4 = m4.multiply(projectionMat, viewMat)
@@ -312,7 +261,7 @@ function getClipSpaceMousePosition(x: number, y: number, state: State) {
 	return [clipX, clipY];
 }
 
-function simulate(state: State): void {
+function simulate(state: State, input: Input): void {
 	let rects = state.app.rects
 	for (let i = 0; i < rects.length; i++) {
 		let rect = rects[i]
@@ -350,6 +299,7 @@ function simulate(state: State): void {
 		verts[offset + 11] = y2
 	}
 
+	let blocked = false
 	state.app.images.list.forEach(img => {
 		if (img.move) {
 			if (state.app.iterations % 1000 === 0) {
@@ -373,19 +323,68 @@ function simulate(state: State): void {
 		}
 	})
 	state.app.iterations++
+
+	if (input.pointer.wasDown) {
+		if (!state.app.pointer.prevX) {
+			state.app.pointer.prevX = input.pointer.clientX
+			state.app.pointer.prevY = input.pointer.clientY
+		}
+		let dx = (input.pointer.clientX - state.app.pointer.prevX)
+		let dy = (input.pointer.clientY - state.app.pointer.prevY)
+
+		state.app.pointer.prevX = input.pointer.clientX
+		state.app.pointer.prevY = input.pointer.clientY
+
+		state.app.camera.x -= dx / state.app.camera.zoom
+		state.app.camera.y -= dy / state.app.camera.zoom
+
+		updateViewProjection(state)
+	} else {
+		state.app.pointer.prevX = 0
+		state.app.pointer.prevY = 0
+	}
+
+	if (input.wheel.deltaY) {
+		let camera = state.app.camera
+
+		const [clipX, clipY] = getClipSpaceMousePosition(input.wheel.clientX, input.wheel.clientY, state)
+
+		// position before zooming
+		const [preZoomX, preZoomY] = m3.transformPoint(
+  	  	  m3.inverse(state.app.viewProjectionM3), 
+  	  	  [clipX, clipY])
+
+		// multiply the wheel movement by the current zoom level
+		// so we zoom less when zoomed in and more when zoomed out
+		const newZoom = camera.zoom * Math.pow(2, input.wheel.deltaY * -0.01)
+		camera.zoom = Math.max(0.02, Math.min(100, newZoom))
+
+		updateViewProjection(state)
+
+		// position after zooming
+		const [postZoomX, postZoomY] = m3.transformPoint(
+  	  	  m3.inverse(state.app.viewProjectionM3), 
+  	  	  [clipX, clipY])
+
+		// camera needs to be moved the difference of before and after
+		camera.x += preZoomX - postZoomX
+		camera.y += preZoomY - postZoomY
+
+		updateViewProjection(state)
+	}
 }
 
 function render(gl: WebGLRenderingContext, state: State, input: Input) {
   	if (
-    	gl.canvas.width !== state.app.displayW ||
-    	gl.canvas.height !== state.app.displayH
+    	gl.canvas.width !== state.displayW ||
+    	gl.canvas.height !== state.displayH
   	) {
-    	gl.canvas.width = state.app.displayW
-    	gl.canvas.height = state.app.displayH
-    	updateViewProjection(gl, state)
+    	gl.canvas.width = state.displayW
+    	gl.canvas.height = state.displayH
+    	updateViewProjection(state)
   	}
 
-  	gl.viewport(0, 0, gl.canvas.width, gl.canvas.height)
+  	gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight)
 
 	let r = ((13 + input.dt * 50) % 255) | 0
 	let g = 123
@@ -444,16 +443,14 @@ function render(gl: WebGLRenderingContext, state: State, input: Input) {
 		gl.vertexAttribPointer(texProgram.a_texcoord, 2, gl.FLOAT, false, 0, 0)
 		gl.bufferData(gl.ARRAY_BUFFER, state.app.images.texCoords, gl.STATIC_DRAW)
 
-		// TODO: this flag is just a fast hack to imitate textures uploading queue
-		// Let uploading took maximum 10ms, measure that and check how much per frame i can upload?
-		let blockUploadTexture = false
 		for (let i = 0; i < state.app.images.list.length; i++) {
 			let image = state.app.images.list[i]
 			if (!image.texture) {
 				if (image.src) {
-					image.texture = createTextureFromSrc(gl, image.src)
+					image.texture = createTextureFromSrc(gl, state, image.src)
 				} else if (image.canvas) {
-					image.texture = createTextureFromCanvas(gl, image.canvas)
+					image.texture = createTextureFromCanvas(gl, state, image.canvas)
+					pushTextureToQueue(state, image.texture)
 				}
 			}
 			if (image.texture) {
@@ -463,6 +460,7 @@ function render(gl: WebGLRenderingContext, state: State, input: Input) {
 					// TODO: no idea why, but this doesn't work for m3, something is busted in calcs
 					let m = m4.identity()
 					m = m4.translate(m, image.x, image.y, 0)
+					m = m4.multiply(m, m4.zRotation(image.rotation))
 					m = m4.scale(m, image.texture.width * image.scale, image.texture.height * image.scale, 1)
 					const projectionMat = m4.projection(gl.canvas.width, gl.canvas.height, 1)
 					m = m4.multiply(state.app.viewProjectionM4, m)
@@ -470,9 +468,6 @@ function render(gl: WebGLRenderingContext, state: State, input: Input) {
 					gl.uniformMatrix4fv(texProgram.u_matrix, false, m)
 					gl.uniform1i(texProgram.u_texture, 0)
 					gl.drawArrays(gl.TRIANGLES, 0, 6)
-				} else if (image.texture.imgLoaded && !blockUploadTexture) {
-					blockUploadTexture = true
-					uploadToGl(gl, image.texture)
 				}
 			}
 		}
@@ -494,17 +489,18 @@ function makeTextCanvas(text: string, w: number, h: number) {
 	return textCtx.canvas
 }
 
-function createTextureFromCanvas(gl: WebGLRenderingContext, canvas: HTMLCanvasElement) {
+function createTextureFromCanvas(gl: WebGLRenderingContext, state: State, canvas: HTMLCanvasElement) {
 	let textureInfo = createTexture(gl)
 	textureInfo.imgData = canvas
 	textureInfo.imgLoaded = true
 	textureInfo.width = canvas.width
 	textureInfo.height = canvas.height
+	pushTextureToQueue(state, textureInfo)
 
 	return textureInfo
 }
 
-function createTextureFromSrc(gl: WebGLRenderingContext, src: string) {
+function createTextureFromSrc(gl: WebGLRenderingContext, state: State, src: string) {
 	let textureInfo = createTexture(gl)
 
 	let img = new Image()
@@ -517,6 +513,7 @@ function createTextureFromSrc(gl: WebGLRenderingContext, src: string) {
 		textureInfo.height = img.height
 		textureInfo.imgLoaded = true
 		textureInfo.imgData = img
+		pushTextureToQueue(state, textureInfo)
 	})
 	img.addEventListener('error', (error) => {
 		textureInfo.error = error

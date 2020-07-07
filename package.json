@@ -9,6 +9,7 @@
   "keywords": [],
   "author": "",
   "devDependencies": {
+    "@types/source-map": "0.5.7",
     "@types/webpack-env": "1.15.2",
     "file-loader": "6.0.0",
     "html-webpack-plugin": "4.3.0",

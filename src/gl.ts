@@ -10,7 +10,6 @@ export type TextureInfo = {
 	texLoaded: boolean
 }
 
-
 export function resizeGl(gl: WebGLRenderingContext, w: number, h: number) {
   	if (
     	gl.canvas.width !== w ||
@@ -63,6 +62,8 @@ export function createProgram(gl: WebGLRenderingContext, vertexSource: string, f
 	return program
 }
 
+// TODO: make a streaming system to monitor current textures size,
+// track recently used textures and delete ones that we didn't use last frames
 export function createTexture(gl: WebGLRenderingContext): TextureInfo {
 	let tex = gl.createTexture()!
 	gl.bindTexture(gl.TEXTURE_2D, tex)
@@ -87,10 +88,7 @@ export function uploadToGl(gl: WebGLRenderingContext, textureInfo: TextureInfo):
 		throw new Error('invalid case')
 	}
 	gl.bindTexture(gl.TEXTURE_2D, textureInfo.texture)
-	var _s = performance.now()
 	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, textureInfo.imgData)
-	var _e = performance.now()
-	console.log('uploaded in', _e - _s)
 
 	if (isPowerOf2(textureInfo.width) && isPowerOf2(textureInfo.height)) {
 		gl.generateMipmap(gl.TEXTURE_2D)
