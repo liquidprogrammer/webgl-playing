@@ -66,13 +66,10 @@ var prevTime = 0
 
 function drawScene(gl, dt) {
 	resizeGl(gl, STATE);
-	// TODO: Does viewport persist?
 	gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-	// TODO: Does clear color persist?
 	gl.clearColor(0, 0, 0, 0);
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-	// TODO: Does flags persist?
 	gl.enable(gl.DEPTH_TEST);
 	gl.enable(gl.CULL_FACE);
 

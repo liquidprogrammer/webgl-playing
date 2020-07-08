@@ -7,7 +7,8 @@
 		"lib": ["es5", "es2015", "dom"],
 		"baseUrl": ".",
 		"sourceMap": false,
-		"strict": true
+		"strict": true,
+		"moduleResolution": "node"
 	},
 	"include": ["./src"]
 }
